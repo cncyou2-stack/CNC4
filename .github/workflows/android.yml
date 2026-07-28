@@ -12,8 +12,8 @@ jobs:
           distribution: 'temurin'
       - name: Build with Gradle
         run: |
-          chmod +x gradlew || true
-          gradle assembleDebug || ./gradlew assembleDebug
+          chmod +x gradlew
+          ./gradlew assembleDebug
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
