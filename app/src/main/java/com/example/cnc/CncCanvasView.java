@@ -7,6 +7,8 @@ import android.graphics.DashPathEffect;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.util.AttributeSet;
+import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 
 import androidx.annotation.Nullable;
@@ -70,24 +72,29 @@ public class CncCanvasView extends View {
     private float minY = 0f, maxY = 50f;
 
     private final List<ToolSegment> segments = new ArrayList<>();
-    private final Path executedPath = new Path();
+    private final List<float[]> executedPoints = new ArrayList<>();
+
+    // Touch gesture detectors for Zoom & Pan
+    private ScaleGestureDetector scaleGestureDetector;
+    private float lastTouchX, lastTouchY;
+    private boolean isPanning = false;
 
     public CncCanvasView(Context context) {
         super(context);
-        init();
+        init(context);
     }
 
     public CncCanvasView(Context context, @Nullable AttributeSet attrs) {
         super(context, attrs);
-        init();
+        init(context);
     }
 
     public CncCanvasView(Context context, @Nullable AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
-        init();
+        init(context);
     }
 
-    private void init() {
+    private void init(Context context) {
         gridPaint = new Paint();
         gridPaint.setColor(Color.parseColor("#1E293B"));
         gridPaint.setStrokeWidth(1.5f);
@@ -155,6 +162,62 @@ public class CncCanvasView extends View {
         legendBgPaint.setColor(Color.parseColor("#1E293B"));
         legendBgPaint.setStyle(Paint.Style.FILL);
         legendBgPaint.setAlpha(220);
+
+        // Setup Pinch to Zoom Gesture Detector
+        scaleGestureDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            @Override
+            public boolean onScale(ScaleGestureDetector detector) {
+                float focusX = detector.getFocusX();
+                float focusY = detector.getFocusY();
+
+                float scaleFactor = detector.getScaleFactor();
+                float prevScale = scale;
+                scale *= scaleFactor;
+                scale = Math.max(0.1f, Math.min(scale, 80.0f));
+
+                // Adjust origin so zoom centers around pinch focus point
+                originX = focusX - (focusX - originX) * (scale / prevScale);
+                originY = focusY - (focusY - originY) * (scale / prevScale);
+
+                invalidate();
+                return true;
+            }
+        });
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        scaleGestureDetector.onTouchEvent(event);
+
+        final int action = event.getActionMasked();
+        switch (action) {
+            case MotionEvent.ACTION_DOWN: {
+                lastTouchX = event.getX();
+                lastTouchY = event.getY();
+                isPanning = true;
+                break;
+            }
+            case MotionEvent.ACTION_MOVE: {
+                if (!scaleGestureDetector.isInProgress() && isPanning) {
+                    float dx = event.getX() - lastTouchX;
+                    float dy = event.getY() - lastTouchY;
+
+                    originX += dx;
+                    originY += dy;
+
+                    lastTouchX = event.getX();
+                    lastTouchY = event.getY();
+                    invalidate();
+                }
+                break;
+            }
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL: {
+                isPanning = false;
+                break;
+            }
+        }
+        return true;
     }
 
     @Override
@@ -168,15 +231,7 @@ public class CncCanvasView extends View {
         this.currentY = y;
         this.currentZ = z;
 
-        float canvasPx = toCanvasX(x);
-        float canvasPy = toCanvasY(y);
-
-        if (executedPath.isEmpty()) {
-            executedPath.moveTo(canvasPx, canvasPy);
-        } else {
-            executedPath.lineTo(canvasPx, canvasPy);
-        }
-
+        executedPoints.add(new float[]{x, y, z});
         invalidate();
     }
 
@@ -187,7 +242,7 @@ public class CncCanvasView extends View {
 
     public void clearAll() {
         segments.clear();
-        executedPath.reset();
+        executedPoints.clear();
         currentX = 0f;
         currentY = 0f;
         currentZ = 0f;
@@ -304,13 +359,10 @@ public class CncCanvasView extends View {
             float y2 = toCanvasY(seg.endY);
 
             if (seg.type == MotionType.RAPID_G00) {
-                // Dashed line for rapid positioning
                 canvas.drawLine(x1, y1, x2, y2, rapidPaint);
             } else if (seg.type == MotionType.LINEAR_G01) {
-                // Solid cyan line for linear cut
                 canvas.drawLine(x1, y1, x2, y2, linearCutPaint);
             } else if (seg.type == MotionType.ARC_CW_G02 || seg.type == MotionType.ARC_CCW_G03) {
-                // Arc Interpolation based on center offsets (I, J)
                 double cx = seg.startX + seg.iOffset;
                 double cy = seg.startY + seg.jOffset;
                 double radius = Math.hypot(seg.iOffset, seg.jOffset);
@@ -351,7 +403,17 @@ public class CncCanvasView extends View {
         }
 
         // 4. Draw Executed Trajectory
-        canvas.drawPath(executedPath, executedPathPaint);
+        if (executedPoints.size() > 1) {
+            Path path = new Path();
+            float p0x = toCanvasX(executedPoints.get(0)[0]);
+            float p0y = toCanvasY(executedPoints.get(0)[1]);
+            path.moveTo(p0x, p0y);
+            for (int i = 1; i < executedPoints.size(); i++) {
+                float[] p = executedPoints.get(i);
+                path.lineTo(toCanvasX(p[0]), toCanvasY(p[1]));
+            }
+            canvas.drawPath(path, executedPathPaint);
+        }
 
         // 5. Draw Tool Head Cursor
         float toolPx = toCanvasX(currentX);
@@ -362,14 +424,14 @@ public class CncCanvasView extends View {
         // Z-depth ring indicator (Red when Z < 0 cutting, Blue when Z >= 0 rapid hover)
         Paint zRingPaint = new Paint();
         zRingPaint.setStyle(Paint.Style.STROKE);
-        zRingPaint.setStrokeWidth(3f);
+        zRingPaint.setStrokeWidth(3.5f);
         zRingPaint.setAntiAlias(true);
         if (currentZ < 0) {
             zRingPaint.setColor(Color.parseColor("#EF4444")); // Red ring during cutting depth
         } else {
             zRingPaint.setColor(Color.parseColor("#3B82F6")); // Blue ring above stock
         }
-        canvas.drawCircle(toolPx, toolPy, 20f, zRingPaint);
+        canvas.drawCircle(toolPx, toolPy, 22f, zRingPaint);
 
         // 6. Draw Color Legend in Top Right
         canvas.drawRect(width - 210, 10, width - 10, 95, legendBgPaint);

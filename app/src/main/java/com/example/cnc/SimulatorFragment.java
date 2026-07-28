@@ -69,6 +69,9 @@ public class SimulatorFragment extends Fragment {
         if (etGcode != null) {
             etGcode.setText(gcode);
             parseAndLoadGcode(gcode);
+            isRunning = true;
+            isPaused = false;
+            updateStatusDisplay("RUNNING");
         }
     }
 
@@ -122,19 +125,24 @@ public class SimulatorFragment extends Fragment {
             if (!input.isEmpty()) {
                 activeGcode = input;
                 parseAndLoadGcode(input);
-                Toast.makeText(getContext(), "G-Code پردازش و بارگذاری شد", Toast.LENGTH_SHORT).show();
+                isRunning = true;
+                isPaused = false;
+                updateStatusDisplay("RUNNING");
+                Toast.makeText(getContext(), "شبیه‌سازی G-Code آغاز شد", Toast.LENGTH_SHORT).show();
             }
         });
 
         btnStart.setOnClickListener(v -> {
             String input = etGcode.getText().toString().trim();
-            if (commandList.isEmpty() || !input.equals(activeGcode)) {
-                activeGcode = input;
-                parseAndLoadGcode(input);
+            if (!input.isEmpty()) {
+                if (commandList.isEmpty() || !input.equals(activeGcode) || currentCmdIndex >= commandList.size()) {
+                    activeGcode = input;
+                    parseAndLoadGcode(input);
+                }
+                isRunning = true;
+                isPaused = false;
+                updateStatusDisplay("RUNNING");
             }
-            isRunning = true;
-            isPaused = false;
-            updateStatusDisplay("RUNNING");
         });
 
         btnPause.setOnClickListener(v -> {
