@@ -38,7 +38,7 @@ public class SimulatorFragment extends Fragment {
     private boolean isRunning = false;
     private boolean isPaused = false;
 
-    private String pendingGcode = null;
+    private String activeGcode = null;
 
     private static class ParsedCommand {
         CncCanvasView.MotionType type;
@@ -64,11 +64,11 @@ public class SimulatorFragment extends Fragment {
     private Runnable animationRunnable;
 
     public void setPendingGcode(String gcode) {
-        this.pendingGcode = gcode;
-        if (etGcode != null && gcode != null) {
+        if (gcode == null || gcode.trim().isEmpty()) return;
+        this.activeGcode = gcode;
+        if (etGcode != null) {
             etGcode.setText(gcode);
             parseAndLoadGcode(gcode);
-            pendingGcode = null;
         }
     }
 
@@ -99,13 +99,13 @@ public class SimulatorFragment extends Fragment {
         setupListeners();
         setupSimulationEngine();
 
-        if (pendingGcode != null) {
-            etGcode.setText(pendingGcode);
-            parseAndLoadGcode(pendingGcode);
-            pendingGcode = null;
+        if (activeGcode != null) {
+            etGcode.setText(activeGcode);
+            parseAndLoadGcode(activeGcode);
         } else {
             // Default demo square + circle
             String demoGcode = "G21 G90 G17\nG00 X0 Y0 Z5\nG01 Z-2 F150\nG01 X50 Y0 F300\nG01 X50 Y50 F300\nG02 X0 Y50 I-25 J0 F200\nG01 X0 Y0 F300\nG00 Z10\nM30";
+            activeGcode = demoGcode;
             etGcode.setText(demoGcode);
             parseAndLoadGcode(demoGcode);
         }
@@ -120,14 +120,17 @@ public class SimulatorFragment extends Fragment {
         btnSendGcode.setOnClickListener(v -> {
             String input = etGcode.getText().toString().trim();
             if (!input.isEmpty()) {
+                activeGcode = input;
                 parseAndLoadGcode(input);
                 Toast.makeText(getContext(), "G-Code پردازش و بارگذاری شد", Toast.LENGTH_SHORT).show();
             }
         });
 
         btnStart.setOnClickListener(v -> {
-            if (commandList.isEmpty()) {
-                parseAndLoadGcode(etGcode.getText().toString());
+            String input = etGcode.getText().toString().trim();
+            if (commandList.isEmpty() || !input.equals(activeGcode)) {
+                activeGcode = input;
+                parseAndLoadGcode(input);
             }
             isRunning = true;
             isPaused = false;

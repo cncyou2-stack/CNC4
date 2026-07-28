@@ -339,8 +339,75 @@ export default function App() {
 
   }, [gcode, posX, posY, posZ]);
 
+  const currentCmdIndexRef = useRef(0);
+
+  useEffect(() => {
+    if (status !== "RUNNING") return;
+
+    const segments = parseGcode(gcode);
+    if (segments.length === 0) return;
+
+    const interval = setInterval(() => {
+      if (currentCmdIndexRef.current >= segments.length) {
+        setStatus("COMPLETED");
+        currentCmdIndexRef.current = 0;
+        return;
+      }
+
+      const target = segments[currentCmdIndexRef.current];
+      const speed = target.type === MotionType.RAPID_G00 ? 3.5 : 1.8;
+
+      setPosX(prevX => {
+        const dx = target.endX - prevX;
+        if (Math.abs(dx) <= speed) {
+          return target.endX;
+        }
+        return prevX + Math.sign(dx) * speed;
+      });
+
+      setPosY(prevY => {
+        const dy = target.endY - prevY;
+        if (Math.abs(dy) <= speed) {
+          return target.endY;
+        }
+        return prevY + Math.sign(dy) * speed;
+      });
+
+      setPosZ(prevZ => {
+        const dz = target.endZ - prevZ;
+        if (Math.abs(dz) <= speed) {
+          return target.endZ;
+        }
+        return prevZ + Math.sign(dz) * speed;
+      });
+
+      // Check if target point reached
+      setPosX(curX => {
+        setPosY(curY => {
+          setPosZ(curZ => {
+            const dist = Math.hypot(target.endX - curX, target.endY - curY, target.endZ - curZ);
+            if (dist <= speed * 1.5) {
+              currentCmdIndexRef.current += 1;
+            }
+            return curZ;
+          });
+          return curY;
+        });
+        return curX;
+      });
+
+    }, 30);
+
+    return () => clearInterval(interval);
+  }, [status, gcode]);
+
   const handleTestInSimulator = (code: string) => {
     setGcode(code);
+    setPosX(0);
+    setPosY(0);
+    setPosZ(0);
+    setStatus("IDLE");
+    currentCmdIndexRef.current = 0;
     setActiveTab('simulator');
   };
 

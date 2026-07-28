@@ -56,7 +56,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void loadGcodeToSimulator(String gcode) {
+        if (simulatorFragment == null) {
+            simulatorFragment = new SimulatorFragment();
+        }
         simulatorFragment.setPendingGcode(gcode);
+        getSupportFragmentManager().beginTransaction()
+                .replace(R.id.fragment_container, simulatorFragment)
+                .commit();
         bottomNavigationView.setSelectedItemId(R.id.nav_simulator);
     }
 }
