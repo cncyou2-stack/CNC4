@@ -67,7 +67,8 @@ public class SimulatorFragment extends Fragment {
         if (gcode == null || gcode.trim().isEmpty()) return;
         this.activeGcode = gcode;
         if (etGcode != null) {
-            etGcode.setText(gcode);
+            etGcode.setText(""); // Complete clear
+            etGcode.setText(gcode); // Overwrite with new sample Gcode
             parseAndLoadGcode(gcode);
             isRunning = true;
             isPaused = false;

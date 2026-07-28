@@ -241,62 +241,104 @@ export default function App() {
     const toCanvasX = (mmX: number) => originX + (mmX * scale);
     const toCanvasY = (mmY: number) => originY - (mmY * scale);
 
-    // 1. Grid
-    ctx.strokeStyle = '#1E293B';
+    // 3D Perspective Projection Engine for Web Preview
+    const rotX = 35 * Math.PI / 180;
+    const rotZ = -45 * Math.PI / 180;
+    const scale3D = 5.5;
+
+    const project3D = (x: number, y: number, z: number) => {
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2 + 30;
+
+      const relX = x - 25;
+      const relY = y - 25;
+      const relZ = z;
+
+      const x1 = relX * Math.cos(rotZ) - relY * Math.sin(rotZ);
+      const y1 = relX * Math.sin(rotZ) + relY * Math.cos(rotZ);
+      const z1 = relZ;
+
+      const x2 = x1;
+      const y2 = y1 * Math.cos(rotX) - z1 * Math.sin(rotX);
+      const z2 = y1 * Math.sin(rotX) + z1 * Math.cos(rotX);
+
+      const viewDist = 1200;
+      const perspective = viewDist / (viewDist + y2);
+
+      const sx = centerX + (x2 * scale3D * perspective);
+      const sy = centerY - (z2 * scale3D * perspective);
+      return [sx, sy];
+    };
+
+    // 1. Draw 3D Stock Bed
+    const p1 = project3D(-10, -10, 0);
+    const p2 = project3D(60, -10, 0);
+    const p3 = project3D(60, 60, 0);
+    const p4 = project3D(-10, 60, 0);
+
+    ctx.fillStyle = '#1E293B';
+    ctx.strokeStyle = '#475569';
+    ctx.lineWidth = 1.5;
+
+    ctx.beginPath();
+    ctx.moveTo(p1[0], p1[1]);
+    ctx.lineTo(p2[0], p2[1]);
+    ctx.lineTo(p3[0], p3[1]);
+    ctx.lineTo(p4[0], p4[1]);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Grid on bed
+    ctx.strokeStyle = '#334155';
     ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-
-    const gridMm = scale > 12 ? 5 : (scale > 4 ? 10 : (scale > 1.5 ? 20 : 50));
-    const gridPx = gridMm * scale;
-
-    for (let x = originX; x < canvas.width; x += gridPx) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+    for (let x = -10; x <= 60; x += 10) {
+      const gp1 = project3D(x, -10, 0);
+      const gp2 = project3D(x, 60, 0);
+      ctx.beginPath(); ctx.moveTo(gp1[0], gp1[1]); ctx.lineTo(gp2[0], gp2[1]); ctx.stroke();
     }
-    for (let x = originX; x > 0; x -= gridPx) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+    for (let y = -10; y <= 60; y += 10) {
+      const gp1 = project3D(-10, y, 0);
+      const gp2 = project3D(60, y, 0);
+      ctx.beginPath(); ctx.moveTo(gp1[0], gp1[1]); ctx.lineTo(gp2[0], gp2[1]); ctx.stroke();
     }
-    for (let y = originY; y < canvas.height; y += gridPx) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
-    }
-    for (let y = originY; y > 0; y -= gridPx) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
-    }
-    ctx.setLineDash([]);
 
-    // 2. Axes
-    ctx.strokeStyle = '#EF4444'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(0, originY); ctx.lineTo(canvas.width, originY); ctx.stroke();
+    // 2. 3D Axes (X Red, Y Green, Z Blue)
+    const o = project3D(0, 0, 0);
+    const axX = project3D(40, 0, 0);
+    const axY = project3D(0, 40, 0);
+    const axZ = project3D(0, 0, 35);
 
-    ctx.strokeStyle = '#22C55E';
-    ctx.beginPath(); ctx.moveTo(originX, 0); ctx.lineTo(originX, canvas.height); ctx.stroke();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#EF4444'; ctx.beginPath(); ctx.moveTo(o[0], o[1]); ctx.lineTo(axX[0], axX[1]); ctx.stroke();
+    ctx.strokeStyle = '#22C55E'; ctx.beginPath(); ctx.moveTo(o[0], o[1]); ctx.lineTo(axY[0], axY[1]); ctx.stroke();
+    ctx.strokeStyle = '#3B82F6'; ctx.beginPath(); ctx.moveTo(o[0], o[1]); ctx.lineTo(axZ[0], axZ[1]); ctx.stroke();
 
-    // 3. Draw Segments
+    // 3. Draw 3D Toolpaths
     for (const seg of segments) {
-      const x1 = toCanvasX(seg.startX);
-      const y1 = toCanvasY(seg.startY);
-      const x2 = toCanvasX(seg.endX);
-      const y2 = toCanvasY(seg.endY);
+      const pStart = project3D(seg.startX, seg.startY, seg.startZ);
+      const pEnd = project3D(seg.endX, seg.endY, seg.endZ);
 
       if (seg.type === MotionType.RAPID_G00) {
         ctx.strokeStyle = '#F87171';
         ctx.lineWidth = 2;
-        ctx.setLineDash([8, 6]);
-        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath(); ctx.moveTo(pStart[0], pStart[1]); ctx.lineTo(pEnd[0], pEnd[1]); ctx.stroke();
         ctx.setLineDash([]);
       } else if (seg.type === MotionType.LINEAR_G01) {
-        ctx.strokeStyle = '#38BDF8';
-        ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+        ctx.strokeStyle = (seg.startZ < 0 || seg.endZ < 0) ? '#F43F5E' : '#38BDF8';
+        ctx.lineWidth = (seg.startZ < 0 || seg.endZ < 0) ? 5 : 3;
+        ctx.beginPath(); ctx.moveTo(pStart[0], pStart[1]); ctx.lineTo(pEnd[0], pEnd[1]); ctx.stroke();
       } else { // Arcs G02 / G03
         const cx = seg.startX + seg.iOffset;
         const cy = seg.startY + seg.jOffset;
         const radius = Math.hypot(seg.iOffset, seg.jOffset);
 
         ctx.strokeStyle = (seg.type === MotionType.ARC_CW_G02) ? '#F59E0B' : '#EC4899';
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 3.5;
 
         if (radius < 1e-3) {
-          ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(pStart[0], pStart[1]); ctx.lineTo(pEnd[0], pEnd[1]); ctx.stroke();
         } else {
           const startAngle = Math.atan2(seg.startY - cy, seg.startX - cx);
           const endAngle = Math.atan2(seg.endY - cy, seg.endX - cx);
@@ -310,32 +352,56 @@ export default function App() {
 
           const steps = Math.max(20, Math.floor(Math.abs(sweep) * 20));
           ctx.beginPath();
-          ctx.moveTo(x1, y1);
+          ctx.moveTo(pStart[0], pStart[1]);
           for (let step = 1; step <= steps; step++) {
             const angle = startAngle + (sweep * step / steps);
             const curMmX = cx + radius * Math.cos(angle);
             const curMmY = cy + radius * Math.sin(angle);
-            ctx.lineTo(toCanvasX(curMmX), toCanvasY(curMmY));
+            const curMmZ = seg.startZ + (seg.endZ - seg.startZ) * step / steps;
+            const pCur = project3D(curMmX, curMmY, curMmZ);
+            ctx.lineTo(pCur[0], pCur[1]);
           }
           ctx.stroke();
         }
       }
     }
 
-    // 4. Tool cursor
-    const toolPx = toCanvasX(posX);
-    const toolPy = toCanvasY(posY);
+    // 4. 3D Spindle & Tool Head
+    const tip = project3D(posX, posY, posZ);
+    const surface = project3D(posX, posY, 0);
+    const collar = project3D(posX, posY, posZ + 12);
+    const spindleTop = project3D(posX, posY, posZ + 32);
 
-    ctx.fillStyle = '#FBBF24';
+    // Vertical guide line
+    ctx.strokeStyle = '#E2E8F0';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(tip[0], tip[1]); ctx.lineTo(surface[0], surface[1]); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Surface ring
+    ctx.strokeStyle = posZ < 0 ? '#EF4444' : '#3B82F6';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(surface[0], surface[1], 12, 0, Math.PI * 2); ctx.stroke();
+
+    // Spindle Body
+    ctx.fillStyle = '#94A3B8';
     ctx.beginPath();
-    ctx.arc(toolPx, toolPy, 7, 0, Math.PI * 2);
+    ctx.moveTo(collar[0] - 16, collar[1]);
+    ctx.lineTo(collar[0] + 16, collar[1]);
+    ctx.lineTo(spindleTop[0] + 16, spindleTop[1]);
+    ctx.lineTo(spindleTop[0] - 16, spindleTop[1]);
+    ctx.closePath();
     ctx.fill();
 
-    ctx.strokeStyle = posZ < 0 ? '#EF4444' : '#3B82F6';
-    ctx.lineWidth = 2;
+    // Cutter Bit Cone
+    ctx.fillStyle = '#FBBF24';
     ctx.beginPath();
-    ctx.arc(toolPx, toolPy, 12, 0, Math.PI * 2);
-    ctx.stroke();
+    ctx.moveTo(collar[0] - 6, collar[1]);
+    ctx.lineTo(collar[0] + 6, collar[1]);
+    ctx.lineTo(tip[0], tip[1]);
+    ctx.closePath();
+    ctx.fill();
 
   }, [gcode, posX, posY, posZ]);
 
@@ -406,7 +472,7 @@ export default function App() {
     setPosX(0);
     setPosY(0);
     setPosZ(0);
-    setStatus("IDLE");
+    setStatus("RUNNING");
     currentCmdIndexRef.current = 0;
     setActiveTab('simulator');
   };
