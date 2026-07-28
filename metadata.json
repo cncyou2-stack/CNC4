@@ -1,0 +1,6 @@
+{
+  "name": "CNC Android Controller",
+  "description": "Native Android Java application for CNC control with Canvas visualization and G-Code controls",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
