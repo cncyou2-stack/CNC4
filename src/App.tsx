@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, AlertOctagon, Cpu, BookOpen, Bot, Send, ArrowRight, CornerDownLeft } from 'lucide-react';
+import { Play, Pause, RotateCcw, AlertOctagon, Cpu, BookOpen, Bot, Send, ArrowRight } from 'lucide-react';
 
 interface TutorialItem {
   code: string;
@@ -14,6 +14,25 @@ interface ChatMsg {
   text: string;
   time: string;
   gcode?: string;
+}
+
+enum MotionType {
+  RAPID_G00,
+  LINEAR_G01,
+  ARC_CW_G02,
+  ARC_CCW_G03
+}
+
+interface ToolSegment {
+  type: MotionType;
+  startX: number;
+  startY: number;
+  startZ: number;
+  endX: number;
+  endY: number;
+  endZ: number;
+  iOffset: number;
+  jOffset: number;
 }
 
 const tutorialsData: TutorialItem[] = [
@@ -82,7 +101,94 @@ export default function App() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Draw Canvas
+  // Parse G-Code with precise Regex
+  const parseGcode = (input: string): ToolSegment[] => {
+    const segments: ToolSegment[] = [];
+    let curX = 0, curY = 0, curZ = 0;
+    let currentMotion = MotionType.LINEAR_G01;
+
+    const lines = input.split('\n');
+    for (const rawLine of lines) {
+      const line = rawLine.replace(/;.*|\(.*\)/g, '').trim().toUpperCase();
+      if (!line) continue;
+
+      // Motion code modal
+      const gMatch = line.match(/G0*([0-3])\b/i);
+      if (gMatch) {
+        const code = gMatch[1];
+        if (code === '0') currentMotion = MotionType.RAPID_G00;
+        else if (code === '1') currentMotion = MotionType.LINEAR_G01;
+        else if (code === '2') currentMotion = MotionType.ARC_CW_G02;
+        else if (code === '3') currentMotion = MotionType.ARC_CCW_G03;
+      }
+
+      let targetX = curX;
+      let targetY = curY;
+      let targetZ = curZ;
+
+      const xMatch = line.match(/X\s*([-+]?\d*\.?\d+)/i);
+      if (xMatch) targetX = parseFloat(xMatch[1]);
+
+      const yMatch = line.match(/Y\s*([-+]?\d*\.?\d+)/i);
+      if (yMatch) targetY = parseFloat(yMatch[1]);
+
+      const zMatch = line.match(/Z\s*([-+]?\d*\.?\d+)/i);
+      if (zMatch) targetZ = parseFloat(zMatch[1]);
+
+      let offsetI = 0;
+      let offsetJ = 0;
+      let radiusR = 0;
+
+      const iMatch = line.match(/I\s*([-+]?\d*\.?\d+)/i);
+      if (iMatch) offsetI = parseFloat(iMatch[1]);
+
+      const jMatch = line.match(/J\s*([-+]?\d*\.?\d+)/i);
+      if (jMatch) offsetJ = parseFloat(jMatch[1]);
+
+      const rMatch = line.match(/R\s*([-+]?\d*\.?\d+)/i);
+      if (rMatch) radiusR = parseFloat(rMatch[1]);
+
+      if (radiusR !== 0 && offsetI === 0 && offsetJ === 0 &&
+        (currentMotion === MotionType.ARC_CW_G02 || currentMotion === MotionType.ARC_CCW_G03)) {
+        const dx = targetX - curX;
+        const dy = targetY - curY;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 0 && dist <= 2 * Math.abs(radiusR)) {
+          const h = Math.sqrt(Math.max(0, radiusR * radiusR - (dist / 2) * (dist / 2)));
+          const mx = (curX + targetX) / 2;
+          const my = (curY + targetY) / 2;
+          let sign = currentMotion === MotionType.ARC_CW_G02 ? -1 : 1;
+          if (radiusR < 0) sign = -sign;
+          const cx = mx + sign * h * (-dy / dist);
+          const cy = my + sign * h * (dx / dist);
+          offsetI = cx - curX;
+          offsetJ = cy - curY;
+        }
+      }
+
+      if (targetX !== curX || targetY !== curY || targetZ !== curZ || offsetI !== 0 || offsetJ !== 0) {
+        segments.push({
+          type: currentMotion,
+          startX: curX,
+          startY: curY,
+          startZ: curZ,
+          endX: targetX,
+          endY: targetY,
+          endZ: targetZ,
+          iOffset: offsetI,
+          jOffset: offsetJ
+        });
+
+        curX = targetX;
+        curY = targetY;
+        curZ = targetZ;
+      }
+    }
+
+    return segments;
+  };
+
+  // Draw Canvas with Auto-Scale
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -91,50 +197,147 @@ export default function App() {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Grid
+    const segments = parseGcode(gcode);
+
+    // Bounding Box Calculation
+    let minX = 0, maxX = 50, minY = 0, maxY = 50;
+    if (segments.length > 0) {
+      minX = Infinity; maxX = -Infinity;
+      minY = Infinity; maxY = -Infinity;
+      minX = Math.min(minX, 0); maxX = Math.max(maxX, 0);
+      minY = Math.min(minY, 0); maxY = Math.max(maxY, 0);
+
+      for (const seg of segments) {
+        minX = Math.min(minX, seg.startX, seg.endX);
+        maxX = Math.max(maxX, seg.startX, seg.endX);
+        minY = Math.min(minY, seg.startY, seg.endY);
+        maxY = Math.max(maxY, seg.startY, seg.endY);
+
+        if (seg.type === MotionType.ARC_CW_G02 || seg.type === MotionType.ARC_CCW_G03) {
+          const cx = seg.startX + seg.iOffset;
+          const cy = seg.startY + seg.jOffset;
+          const r = Math.hypot(seg.iOffset, seg.jOffset);
+          if (r > 0) {
+            minX = Math.min(minX, cx - r);
+            maxX = Math.max(maxX, cx + r);
+            minY = Math.min(minY, cy - r);
+            maxY = Math.max(maxY, cy + r);
+          }
+        }
+      }
+    }
+
+    const contentW = Math.max(15, maxX - minX);
+    const contentH = Math.max(15, maxY - minY);
+    const padding = 50;
+
+    const scale = Math.min((canvas.width - 2 * padding) / contentW, (canvas.height - 2 * padding) / contentH);
+    const midX = (minX + maxX) / 2;
+    const midY = (minY + maxY) / 2;
+
+    const originX = (canvas.width / 2) - (midX * scale);
+    const originY = (canvas.height / 2) + (midY * scale);
+
+    const toCanvasX = (mmX: number) => originX + (mmX * scale);
+    const toCanvasY = (mmY: number) => originY - (mmY * scale);
+
+    // 1. Grid
     ctx.strokeStyle = '#1E293B';
     ctx.lineWidth = 1;
-    const originX = 60;
-    const originY = 320;
-    const scale = 3.5;
+    ctx.setLineDash([4, 4]);
 
-    for (let x = 0; x < canvas.width; x += 30) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, canvas.height);
-      ctx.stroke();
-    }
-    for (let y = 0; y < canvas.height; y += 30) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(canvas.width, y);
-      ctx.stroke();
-    }
+    const gridMm = scale > 12 ? 5 : (scale > 4 ? 10 : (scale > 1.5 ? 20 : 50));
+    const gridPx = gridMm * scale;
 
-    // Axes
-    ctx.strokeStyle = '#EF4444';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(originX, originY);
-    ctx.lineTo(originX + 180, originY);
-    ctx.stroke();
+    for (let x = originX; x < canvas.width; x += gridPx) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+    }
+    for (let x = originX; x > 0; x -= gridPx) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+    }
+    for (let y = originY; y < canvas.height; y += gridPx) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+    }
+    for (let y = originY; y > 0; y -= gridPx) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // 2. Axes
+    ctx.strokeStyle = '#EF4444'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, originY); ctx.lineTo(canvas.width, originY); ctx.stroke();
 
     ctx.strokeStyle = '#22C55E';
-    ctx.beginPath();
-    ctx.moveTo(originX, originY);
-    ctx.lineTo(originX, originY - 180);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(originX, 0); ctx.lineTo(originX, canvas.height); ctx.stroke();
 
-    // Tool cursor
-    const toolPx = originX + posX * scale;
-    const toolPy = originY - posY * scale;
+    // 3. Draw Segments
+    for (const seg of segments) {
+      const x1 = toCanvasX(seg.startX);
+      const y1 = toCanvasY(seg.startY);
+      const x2 = toCanvasX(seg.endX);
+      const y2 = toCanvasY(seg.endY);
+
+      if (seg.type === MotionType.RAPID_G00) {
+        ctx.strokeStyle = '#F87171';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8, 6]);
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+        ctx.setLineDash([]);
+      } else if (seg.type === MotionType.LINEAR_G01) {
+        ctx.strokeStyle = '#38BDF8';
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      } else { // Arcs G02 / G03
+        const cx = seg.startX + seg.iOffset;
+        const cy = seg.startY + seg.jOffset;
+        const radius = Math.hypot(seg.iOffset, seg.jOffset);
+
+        ctx.strokeStyle = (seg.type === MotionType.ARC_CW_G02) ? '#F59E0B' : '#EC4899';
+        ctx.lineWidth = 3;
+
+        if (radius < 1e-3) {
+          ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+        } else {
+          const startAngle = Math.atan2(seg.startY - cy, seg.startX - cx);
+          const endAngle = Math.atan2(seg.endY - cy, seg.endX - cx);
+          let sweep = endAngle - startAngle;
+
+          if (seg.type === MotionType.ARC_CW_G02) {
+            if (sweep >= 0) sweep -= 2 * Math.PI;
+          } else {
+            if (sweep <= 0) sweep += 2 * Math.PI;
+          }
+
+          const steps = Math.max(20, Math.floor(Math.abs(sweep) * 20));
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          for (let step = 1; step <= steps; step++) {
+            const angle = startAngle + (sweep * step / steps);
+            const curMmX = cx + radius * Math.cos(angle);
+            const curMmY = cy + radius * Math.sin(angle);
+            ctx.lineTo(toCanvasX(curMmX), toCanvasY(curMmY));
+          }
+          ctx.stroke();
+        }
+      }
+    }
+
+    // 4. Tool cursor
+    const toolPx = toCanvasX(posX);
+    const toolPy = toCanvasY(posY);
 
     ctx.fillStyle = '#FBBF24';
     ctx.beginPath();
-    ctx.arc(toolPx, toolPy, 8, 0, Math.PI * 2);
+    ctx.arc(toolPx, toolPy, 7, 0, Math.PI * 2);
     ctx.fill();
 
-  }, [posX, posY, posZ]);
+    ctx.strokeStyle = posZ < 0 ? '#EF4444' : '#3B82F6';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(toolPx, toolPy, 12, 0, Math.PI * 2);
+    ctx.stroke();
+
+  }, [gcode, posX, posY, posZ]);
 
   const handleTestInSimulator = (code: string) => {
     setGcode(code);
@@ -210,8 +413,11 @@ export default function App() {
             {/* Canvas Visualizer */}
             <div className="bg-[#020617] rounded-xl border border-slate-800 p-2 flex justify-center items-center h-80 relative overflow-hidden">
               <canvas ref={canvasRef} width={600} height={360} className="w-full h-full object-contain" />
-              <div className="absolute top-3 left-3 text-xs font-mono text-slate-500 bg-slate-900/80 px-2 py-1 rounded">
-                G00 (Rapid) / G01 (Line) / G02 (CW Arc) / G03 (CCW Arc)
+              <div className="absolute top-3 left-3 text-xs font-mono text-slate-400 bg-slate-900/90 px-2.5 py-1 rounded border border-slate-800 flex gap-3">
+                <span className="text-red-400">G00 Rapid</span>
+                <span className="text-sky-400">G01 Linear</span>
+                <span className="text-amber-400">G02 CW Arc</span>
+                <span className="text-pink-400">G03 CCW Arc</span>
               </div>
             </div>
 

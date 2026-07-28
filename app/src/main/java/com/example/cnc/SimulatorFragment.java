@@ -18,6 +18,8 @@ import androidx.fragment.app.Fragment;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class SimulatorFragment extends Fragment {
 
@@ -119,7 +121,7 @@ public class SimulatorFragment extends Fragment {
             String input = etGcode.getText().toString().trim();
             if (!input.isEmpty()) {
                 parseAndLoadGcode(input);
-                Toast.makeText(getContext(), "G-Code بارگذاری شد", Toast.LENGTH_SHORT).show();
+                Toast.makeText(getContext(), "G-Code پردازش و بارگذاری شد", Toast.LENGTH_SHORT).show();
             }
         });
 
@@ -180,56 +182,110 @@ public class SimulatorFragment extends Fragment {
         commandList.clear();
         currentCmdIndex = 0;
 
+        if (input == null || input.trim().isEmpty()) return;
+
         float curX = 0f, curY = 0f, curZ = 0f;
-        CncCanvasView.MotionType currentMode = CncCanvasView.MotionType.LINEAR_G01;
+        CncCanvasView.MotionType currentMotion = CncCanvasView.MotionType.LINEAR_G01;
+
+        // Compiled Regex Patterns for Precise Keyword Parsing
+        Pattern patternG = Pattern.compile("G0*([0-3])\\b", Pattern.CASE_INSENSITIVE);
+        Pattern patternX = Pattern.compile("X\\s*([-+]?\\d*\\.?\\d+)", Pattern.CASE_INSENSITIVE);
+        Pattern patternY = Pattern.compile("Y\\s*([-+]?\\d*\\.?\\d+)", Pattern.CASE_INSENSITIVE);
+        Pattern patternZ = Pattern.compile("Z\\s*([-+]?\\d*\\.?\\d+)", Pattern.CASE_INSENSITIVE);
+        Pattern patternI = Pattern.compile("I\\s*([-+]?\\d*\\.?\\d+)", Pattern.CASE_INSENSITIVE);
+        Pattern patternJ = Pattern.compile("J\\s*([-+]?\\d*\\.?\\d+)", Pattern.CASE_INSENSITIVE);
+        Pattern patternR = Pattern.compile("R\\s*([-+]?\\d*\\.?\\d+)", Pattern.CASE_INSENSITIVE);
 
         String[] lines = input.split("\n");
-        for (String line : lines) {
-            line = line.trim().toUpperCase();
-            if (line.isEmpty() || line.startsWith(";")) continue;
+        for (String rawLine : lines) {
+            String line = rawLine.replaceAll(";.*|\\(.*\\)", "").trim().toUpperCase();
+            if (line.isEmpty()) continue;
 
-            if (line.contains("G00") || line.contains("G0 ")) {
-                currentMode = CncCanvasView.MotionType.RAPID_G00;
-            } else if (line.contains("G01") || line.contains("G1 ")) {
-                currentMode = CncCanvasView.MotionType.LINEAR_G01;
-            } else if (line.contains("G02") || line.contains("G2 ")) {
-                currentMode = CncCanvasView.MotionType.ARC_CW_G02;
-            } else if (line.contains("G03") || line.contains("G3 ")) {
-                currentMode = CncCanvasView.MotionType.ARC_CCW_G03;
+            // 1. Detect Motion Type (Modal)
+            Matcher mG = patternG.matcher(line);
+            if (mG.find()) {
+                String code = mG.group(1);
+                if ("0".equals(code)) currentMotion = CncCanvasView.MotionType.RAPID_G00;
+                else if ("1".equals(code)) currentMotion = CncCanvasView.MotionType.LINEAR_G01;
+                else if ("2".equals(code)) currentMotion = CncCanvasView.MotionType.ARC_CW_G02;
+                else if ("3".equals(code)) currentMotion = CncCanvasView.MotionType.ARC_CCW_G03;
             }
 
+            // 2. Extract Target Coordinates (Preserve previous position if omitted)
             float targetX = curX;
             float targetY = curY;
             float targetZ = curZ;
+
+            Matcher mX = patternX.matcher(line);
+            if (mX.find()) {
+                try { targetX = Float.parseFloat(mX.group(1)); } catch (Exception ignored) {}
+            }
+
+            Matcher mY = patternY.matcher(line);
+            if (mY.find()) {
+                try { targetY = Float.parseFloat(mY.group(1)); } catch (Exception ignored) {}
+            }
+
+            Matcher mZ = patternZ.matcher(line);
+            if (mZ.find()) {
+                try { targetZ = Float.parseFloat(mZ.group(1)); } catch (Exception ignored) {}
+            }
+
+            // 3. Extract Arc Parameters I, J, R
             float offsetI = 0f;
             float offsetJ = 0f;
+            float radiusR = 0f;
 
-            String[] tokens = line.split("\\s+");
-            for (String token : tokens) {
-                if (token.startsWith("X")) {
-                    try { targetX = Float.parseFloat(token.substring(1)); } catch (Exception ignored) {}
-                } else if (token.startsWith("Y")) {
-                    try { targetY = Float.parseFloat(token.substring(1)); } catch (Exception ignored) {}
-                } else if (token.startsWith("Z")) {
-                    try { targetZ = Float.parseFloat(token.substring(1)); } catch (Exception ignored) {}
-                } else if (token.startsWith("I")) {
-                    try { offsetI = Float.parseFloat(token.substring(1)); } catch (Exception ignored) {}
-                } else if (token.startsWith("J")) {
-                    try { offsetJ = Float.parseFloat(token.substring(1)); } catch (Exception ignored) {}
+            Matcher mI = patternI.matcher(line);
+            if (mI.find()) {
+                try { offsetI = Float.parseFloat(mI.group(1)); } catch (Exception ignored) {}
+            }
+
+            Matcher mJ = patternJ.matcher(line);
+            if (mJ.find()) {
+                try { offsetJ = Float.parseFloat(mJ.group(1)); } catch (Exception ignored) {}
+            }
+
+            Matcher mR = patternR.matcher(line);
+            if (mR.find()) {
+                try { radiusR = Float.parseFloat(mR.group(1)); } catch (Exception ignored) {}
+            }
+
+            // If Radius R is provided instead of I, J in arcs
+            if (radiusR != 0f && offsetI == 0f && offsetJ == 0f &&
+                    (currentMotion == CncCanvasView.MotionType.ARC_CW_G02 || currentMotion == CncCanvasView.MotionType.ARC_CCW_G03)) {
+                float dx = targetX - curX;
+                float dy = targetY - curY;
+                float dist = (float) Math.hypot(dx, dy);
+                if (dist > 0 && dist <= 2 * Math.abs(radiusR)) {
+                    float h = (float) Math.sqrt(Math.max(0, radiusR * radiusR - (dist / 2f) * (dist / 2f)));
+                    float mx = (curX + targetX) / 2f;
+                    float my = (curY + targetY) / 2f;
+                    float sign = (currentMotion == CncCanvasView.MotionType.ARC_CW_G02) ? -1f : 1f;
+                    if (radiusR < 0) sign = -sign;
+                    float cx = mx + sign * h * (-dy / dist);
+                    float cy = my + sign * h * (dx / dist);
+                    offsetI = cx - curX;
+                    offsetJ = cy - curY;
                 }
             }
 
-            cncCanvas.addSegment(new CncCanvasView.ToolSegment(
-                    currentMode, curX, curY, curZ, targetX, targetY, targetZ, offsetI, offsetJ
-            ));
+            // Add segment if position changed or arc configured
+            boolean positionChanged = (targetX != curX || targetY != curY || targetZ != curZ || offsetI != 0f || offsetJ != 0f);
+            if (positionChanged) {
+                CncCanvasView.ToolSegment segment = new CncCanvasView.ToolSegment(
+                        currentMotion, curX, curY, curZ, targetX, targetY, targetZ, offsetI, offsetJ
+                );
+                cncCanvas.addSegment(segment);
+                commandList.add(new ParsedCommand(currentMotion, targetX, targetY, targetZ, offsetI, offsetJ, rawLine));
 
-            commandList.add(new ParsedCommand(currentMode, targetX, targetY, targetZ, offsetI, offsetJ, line));
-
-            curX = targetX;
-            curY = targetY;
-            curZ = targetZ;
+                curX = targetX;
+                curY = targetY;
+                curZ = targetZ;
+            }
         }
 
+        cncCanvas.recalculateScaleAndBounds();
         posX = 0f;
         posY = 0f;
         posZ = 0f;
@@ -258,7 +314,7 @@ public class SimulatorFragment extends Fragment {
                 if (isRunning && !isPaused && !commandList.isEmpty() && currentCmdIndex < commandList.size()) {
                     ParsedCommand target = commandList.get(currentCmdIndex);
 
-                    float speed = (target.type == CncCanvasView.MotionType.RAPID_G00) ? 3.0f : 1.5f;
+                    float speed = (target.type == CncCanvasView.MotionType.RAPID_G00) ? 3.5f : 1.8f;
 
                     float dx = target.x - posX;
                     float dy = target.y - posY;
