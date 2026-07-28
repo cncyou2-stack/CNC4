@@ -1,225 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="12dp"
     android:background="#121824">
 
-    <!-- Top Status Bar -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:background="#1E293B"
-        android:padding="10dp"
-        android:layout_marginBottom="8dp">
-
-        <TextView
-            android:id="@+id/tvCoordinates"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="X: 0.00  Y: 0.00  Z: 0.00"
-            android:textColor="#38BDF8"
-            android:textSize="14sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/tvStatus"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="STATUS: IDLE"
-            android:textColor="#4ADE80"
-            android:textSize="14sp"
-            android:textStyle="bold" />
-    </LinearLayout>
-
-    <!-- CNC Canvas Visualizer -->
-    <com.example.cnc.CncCanvasView
-        android:id="@+id/cncCanvas"
+    <!-- Fragment Container -->
+    <FrameLayout
+        android:id="@+id/fragment_container"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:background="#0F172A"
-        android:layout_marginBottom="8dp" />
+        android:layout_weight="1" />
 
-    <!-- G-Code Command Input Section -->
-    <LinearLayout
+    <!-- Bottom Navigation Bar -->
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottom_navigation"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginBottom="8dp">
-
-        <EditText
-            android:id="@+id/etGcode"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:hint="Enter G-Code (e.g. G1 X50 Y50 F500)"
-            android:textColorHint="#64748B"
-            android:textColor="#F8FAFC"
-            android:background="#1E293B"
-            android:padding="10dp"
-            android:textSize="14sp"
-            android:inputType="textCapCharacters" />
-
-        <Button
-            android:id="@+id/btnSendGcode"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Send"
-            android:layout_marginStart="6dp"
-            android:backgroundTint="#0284C7"
-            android:textColor="#FFFFFF" />
-    </LinearLayout>
-
-    <!-- Execution Control Buttons -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginBottom="8dp">
-
-        <Button
-            android:id="@+id/btnStart"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="▶ Start"
-            android:backgroundTint="#16A34A"
-            android:textColor="#FFFFFF"
-            android:layout_marginEnd="4dp" />
-
-        <Button
-            android:id="@+id/btnPause"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="⏸ Pause"
-            android:backgroundTint="#CA8A04"
-            android:textColor="#FFFFFF"
-            android:layout_marginEnd="4dp" />
-
-        <Button
-            android:id="@+id/btnReset"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="🔄 Reset"
-            android:backgroundTint="#475569"
-            android:textColor="#FFFFFF"
-            android:layout_marginEnd="4dp" />
-
-        <Button
-            android:id="@+id/btnStop"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="🛑 E-STOP"
-            android:backgroundTint="#DC2626"
-            android:textColor="#FFFFFF" />
-    </LinearLayout>
-
-    <!-- Manual Jog Control Pad -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
         android:background="#1E293B"
-        android:padding="8dp">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Manual Jog Controls (X / Y / Z)"
-            android:textColor="#94A3B8"
-            android:textSize="12sp"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginBottom="6dp" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center">
-
-            <Button
-                android:id="@+id/btnJogYPlus"
-                android:layout_width="80dp"
-                android:layout_height="40dp"
-                android:text="Y+"
-                android:textSize="12sp"
-                android:backgroundTint="#334155" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center"
-            android:layout_marginTop="4dp"
-            android:layout_marginBottom="4dp">
-
-            <Button
-                android:id="@+id/btnJogXMinus"
-                android:layout_width="80dp"
-                android:layout_height="40dp"
-                android:text="X-"
-                android:textSize="12sp"
-                android:backgroundTint="#334155"
-                android:layout_marginEnd="8dp" />
-
-            <Button
-                android:id="@+id/btnHome"
-                android:layout_width="80dp"
-                android:layout_height="40dp"
-                android:text="HOME"
-                android:textSize="11sp"
-                android:backgroundTint="#0EA5E9"
-                android:layout_marginEnd="8dp" />
-
-            <Button
-                android:id="@+id/btnJogXPlus"
-                android:layout_width="80dp"
-                android:layout_height="40dp"
-                android:text="X+"
-                android:textSize="12sp"
-                android:backgroundTint="#334155" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center">
-
-            <Button
-                android:id="@+id/btnJogYMinus"
-                android:layout_width="80dp"
-                android:layout_height="40dp"
-                android:text="Y-"
-                android:textSize="12sp"
-                android:backgroundTint="#334155"
-                android:layout_marginEnd="16dp" />
-
-            <Button
-                android:id="@+id/btnJogZPlus"
-                android:layout_width="60dp"
-                android:layout_height="40dp"
-                android:text="Z+"
-                android:textSize="12sp"
-                android:backgroundTint="#475569"
-                android:layout_marginEnd="4dp" />
-
-            <Button
-                android:id="@+id/btnJogZMinus"
-                android:layout_width="60dp"
-                android:layout_height="40dp"
-                android:text="Z-"
-                android:textSize="12sp"
-                android:backgroundTint="#475569" />
-        </LinearLayout>
-    </LinearLayout>
+        app:itemIconTint="@color/bottom_nav_color_selector"
+        app:itemTextColor="@color/bottom_nav_color_selector"
+        app:menu="@menu/bottom_nav_menu" />
 
 </LinearLayout>

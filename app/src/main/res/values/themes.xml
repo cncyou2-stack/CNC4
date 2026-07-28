@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.CNCController" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#0EA5E9</item>
+        <item name="colorPrimaryVariant">#0284C7</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="android:statusBarColor">#121824</item>
+        <item name="android:windowBackground">#121824</item>
+    </style>
+</resources>

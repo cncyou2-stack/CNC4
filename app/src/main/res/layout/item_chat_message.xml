@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="6dp">
+
+    <!-- Message Bubble Container -->
+    <LinearLayout
+        android:id="@+id/messageContainer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp"
+        android:maxWidth="320dp"
+        android:background="#1E293B">
+
+        <!-- Sender Header -->
+        <TextView
+            android:id="@+id/tvSender"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Gemini AI"
+            android:textColor="#38BDF8"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <!-- Message Body -->
+        <TextView
+            android:id="@+id/tvMessageBody"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="سلام! من دستیار تخصصی CNC و G-Code هستم."
+            android:textColor="#F8FAFC"
+            android:textSize="14sp"
+            android:lineSpacingExtra="3dp" />
+
+        <!-- Extracted G-Code Box & Test Button -->
+        <LinearLayout
+            android:id="@+id/layoutGcodeBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="#0F172A"
+            android:padding="8dp"
+            android:layout_marginTop="8dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="کد G-Code تولید شده:"
+                android:textColor="#64748B"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/tvExtractedGcode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="G01 X50 Y50"
+                android:textColor="#38BDF8"
+                android:textSize="12sp"
+                android:typeface="monospace"
+                android:layout_marginTop="2dp" />
+
+            <Button
+                android:id="@+id/btnRunInSimulator"
+                android:layout_width="wrap_content"
+                android:layout_height="34dp"
+                android:layout_gravity="end"
+                android:layout_marginTop="6dp"
+                android:text="انتقال و اجرای کد در شبیه‌ساز ➔"
+                android:textSize="11sp"
+                android:backgroundTint="#0284C7"
+                android:textColor="#FFFFFF"
+                android:insetTop="0dp"
+                android:insetBottom="0dp" />
+        </LinearLayout>
+
+        <!-- Time Stamp -->
+        <TextView
+            android:id="@+id/tvTimestamp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:layout_marginTop="4dp"
+            android:text="04:15"
+            android:textColor="#64748B"
+            android:textSize="10sp" />
+
+    </LinearLayout>
+
+</LinearLayout>

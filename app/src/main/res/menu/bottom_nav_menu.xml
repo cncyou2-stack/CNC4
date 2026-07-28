@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_simulator"
+        android:icon="@drawable/ic_simulator"
+        android:title="شبیه‌ساز" />
+    <item
+        android:id="@+id/nav_tutorials"
+        android:icon="@drawable/ic_tutorials"
+        android:title="آموزش G-Code" />
+    <item
+        android:id="@+id/nav_ai"
+        android:icon="@drawable/ic_ai"
+        android:title="دستیار AI" />
+</menu>
