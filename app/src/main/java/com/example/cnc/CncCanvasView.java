@@ -4,10 +4,8 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.DashPathEffect;
-import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
-import android.graphics.Shader;
 import android.util.AttributeSet;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
@@ -22,8 +20,8 @@ import java.util.Locale;
 
 /**
  * Advanced 3D CNC Viewport Canvas.
- * Provides interactive 3D perspective projection, 3D coordinate axes (X,Y,Z),
- * 3D spindle & tool head, 3D workpiece stock bed, and G00/G01/G02/G03 path visualization.
+ * Supports G00, G01, G02, G03 motions, Work Planes (G17 XY, G18 XZ, G19 YZ),
+ * Modal States, 3D Perspective Projection, Spindle/Tool rendering, and interactive touch controls.
  */
 public class CncCanvasView extends View {
 
@@ -34,15 +32,24 @@ public class CncCanvasView extends View {
         ARC_CCW_G03
     }
 
+    public enum WorkPlane {
+        XY_G17,
+        XZ_G18,
+        YZ_G19
+    }
+
     public static class ToolSegment {
         public MotionType type;
+        public WorkPlane plane;
         public float startX, startY, startZ;
         public float endX, endY, endZ;
-        public float iOffset, jOffset;
+        public float iOffset, jOffset, kOffset;
+        public float feedRate;
 
-        public ToolSegment(MotionType type, float startX, float startY, float startZ,
-                           float endX, float endY, float endZ, float iOffset, float jOffset) {
+        public ToolSegment(MotionType type, WorkPlane plane, float startX, float startY, float startZ,
+                           float endX, float endY, float endZ, float iOffset, float jOffset, float kOffset, float feedRate) {
             this.type = type;
+            this.plane = plane;
             this.startX = startX;
             this.startY = startY;
             this.startZ = startZ;
@@ -51,6 +58,8 @@ public class CncCanvasView extends View {
             this.endZ = endZ;
             this.iOffset = iOffset;
             this.jOffset = jOffset;
+            this.kOffset = kOffset;
+            this.feedRate = feedRate;
         }
     }
 
@@ -64,6 +73,9 @@ public class CncCanvasView extends View {
     private float currentX = 0f;
     private float currentY = 0f;
     private float currentZ = 0f;
+
+    private WorkPlane activePlane = WorkPlane.XY_G17;
+    private float activeFeed = 200f;
 
     private float minX = 0f, maxX = 60f;
     private float minY = 0f, maxY = 60f;
@@ -150,13 +162,13 @@ public class CncCanvasView extends View {
 
         // Motion Paths
         rapidPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        rapidPaint.setColor(Color.parseColor("#F87171")); // Dashed Coral
+        rapidPaint.setColor(Color.parseColor("#F87171")); // Dashed Coral Rapid G00
         rapidPaint.setStrokeWidth(2.5f);
         rapidPaint.setStyle(Paint.Style.STROKE);
         rapidPaint.setPathEffect(new DashPathEffect(new float[]{10, 8}, 0));
 
         linearCutPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        linearCutPaint.setColor(Color.parseColor("#38BDF8")); // Cyan
+        linearCutPaint.setColor(Color.parseColor("#38BDF8")); // Cyan G01
         linearCutPaint.setStrokeWidth(4.5f);
         linearCutPaint.setStyle(Paint.Style.STROKE);
 
@@ -166,12 +178,12 @@ public class CncCanvasView extends View {
         depthCutPaint.setStyle(Paint.Style.STROKE);
 
         arcCwPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        arcCwPaint.setColor(Color.parseColor("#F59E0B")); // Amber
+        arcCwPaint.setColor(Color.parseColor("#F59E0B")); // Amber G02 Arc
         arcCwPaint.setStrokeWidth(5.0f);
         arcCwPaint.setStyle(Paint.Style.STROKE);
 
         arcCcwPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        arcCcwPaint.setColor(Color.parseColor("#EC4899")); // Pink
+        arcCcwPaint.setColor(Color.parseColor("#EC4899")); // Pink G03 Arc
         arcCcwPaint.setStrokeWidth(5.0f);
         arcCcwPaint.setStyle(Paint.Style.STROKE);
 
@@ -298,6 +310,8 @@ public class CncCanvasView extends View {
 
     public void addSegment(ToolSegment segment) {
         segments.add(segment);
+        this.activePlane = segment.plane;
+        this.activeFeed = segment.feedRate;
         invalidate();
     }
 
@@ -307,6 +321,8 @@ public class CncCanvasView extends View {
         currentX = 0f;
         currentY = 0f;
         currentZ = 0f;
+        activePlane = WorkPlane.XY_G17;
+        activeFeed = 200f;
         recalculateScaleAndBounds();
         invalidate();
     }
@@ -398,7 +414,7 @@ public class CncCanvasView extends View {
         // 2. Draw 3D Coordinate System Axes (X, Y, Z)
         draw3dAxes(canvas);
 
-        // 3. Draw Planned G-Code Toolpaths in 3D
+        // 3. Draw Planned G-Code Toolpaths in 3D (G00, G01, G02, G03 across planes G17/18/19)
         draw3dToolpaths(canvas);
 
         // 4. Draw Executed Trajectory
@@ -436,7 +452,6 @@ public class CncCanvasView extends View {
         // Draw 3D Stock Block Depth Sides (Z = -15mm thickness)
         float[] b1 = project3D(bedMinX, bedMinY, -15);
         float[] b2 = project3D(bedMaxX, bedMinY, -15);
-        float[] b3 = project3D(bedMaxX, bedMaxY, -15);
 
         Path sidePath = new Path();
         sidePath.moveTo(p1[0], p1[1]);
@@ -507,49 +522,134 @@ public class CncCanvasView extends View {
             if (seg.type == MotionType.RAPID_G00) {
                 canvas.drawLine(pStart[0], pStart[1], pEnd[0], pEnd[1], rapidPaint);
             } else if (seg.type == MotionType.LINEAR_G01) {
-                // If Z < 0 (Cutting into material), draw prominent deep cut stroke
+                // If Z < 0 (Cutting into material), draw deep cut red path
                 if (seg.startZ < 0 || seg.endZ < 0) {
                     canvas.drawLine(pStart[0], pStart[1], pEnd[0], pEnd[1], depthCutPaint);
                 } else {
                     canvas.drawLine(pStart[0], pStart[1], pEnd[0], pEnd[1], linearCutPaint);
                 }
             } else if (seg.type == MotionType.ARC_CW_G02 || seg.type == MotionType.ARC_CCW_G03) {
-                double cx = seg.startX + seg.iOffset;
-                double cy = seg.startY + seg.jOffset;
-                double radius = Math.hypot(seg.iOffset, seg.jOffset);
+                draw3dArcSegment(canvas, seg, pStart, pEnd);
+            }
+        }
+    }
 
-                if (radius < 1e-3) {
-                    canvas.drawLine(pStart[0], pStart[1], pEnd[0], pEnd[1],
-                            seg.type == MotionType.ARC_CW_G02 ? arcCwPaint : arcCcwPaint);
+    private void draw3dArcSegment(Canvas canvas, ToolSegment seg, float[] pStart, float[] pEnd) {
+        if (seg.plane == WorkPlane.XZ_G18) {
+            // Plane G18: XZ Plane Arc (Offsets I along X, K along Z)
+            double cx = seg.startX + seg.iOffset;
+            double cz = seg.startZ + seg.kOffset;
+            double radius = Math.hypot(seg.iOffset, seg.kOffset);
+
+            if (radius < 1e-3) {
+                canvas.drawLine(pStart[0], pStart[1], pEnd[0], pEnd[1],
+                        seg.type == MotionType.ARC_CW_G02 ? arcCwPaint : arcCcwPaint);
+            } else {
+                double startAngle = Math.atan2(seg.startZ - cz, seg.startX - cx);
+                double endAngle = Math.atan2(seg.endZ - cz, seg.endX - cx);
+                double sweep = endAngle - startAngle;
+
+                if (seg.type == MotionType.ARC_CW_G02) {
+                    if (sweep >= 0) sweep -= 2 * Math.PI;
                 } else {
-                    double startAngle = Math.atan2(seg.startY - cy, seg.startX - cx);
-                    double endAngle = Math.atan2(seg.endY - cy, seg.endX - cx);
-                    double sweep = endAngle - startAngle;
+                    if (sweep <= 0) sweep += 2 * Math.PI;
+                }
 
-                    if (seg.type == MotionType.ARC_CW_G02) {
-                        if (sweep >= 0) sweep -= 2 * Math.PI;
-                    } else {
-                        if (sweep <= 0) sweep += 2 * Math.PI;
-                    }
+                int steps = Math.max(20, (int) (Math.abs(sweep) * 20));
+                Paint arcPaint = (seg.type == MotionType.ARC_CW_G02) ? arcCwPaint : arcCcwPaint;
 
-                    int steps = Math.max(20, (int) (Math.abs(sweep) * 20));
-                    Paint arcPaint = (seg.type == MotionType.ARC_CW_G02) ? arcCwPaint : arcCcwPaint;
+                float prevX = pStart[0];
+                float prevY = pStart[1];
 
-                    float prevX = pStart[0];
-                    float prevY = pStart[1];
+                for (int i = 1; i <= steps; i++) {
+                    double angle = startAngle + (sweep * i / steps);
+                    float curMmX = (float) (cx + radius * Math.cos(angle));
+                    float curMmZ = (float) (cz + radius * Math.sin(angle));
+                    float curMmY = seg.startY + (seg.endY - seg.startY) * i / steps;
 
-                    for (int i = 1; i <= steps; i++) {
-                        double angle = startAngle + (sweep * i / steps);
-                        float curMmX = (float) (cx + radius * Math.cos(angle));
-                        float curMmY = (float) (cy + radius * Math.sin(angle));
-                        float curMmZ = seg.startX + (seg.endZ - seg.startZ) * i / steps;
+                    float[] pCur = project3D(curMmX, curMmY, curMmZ);
+                    canvas.drawLine(prevX, prevY, pCur[0], pCur[1], arcPaint);
 
-                        float[] pCur = project3D(curMmX, curMmY, curMmZ);
-                        canvas.drawLine(prevX, prevY, pCur[0], pCur[1], arcPaint);
+                    prevX = pCur[0];
+                    prevY = pCur[1];
+                }
+            }
+        } else if (seg.plane == WorkPlane.YZ_G19) {
+            // Plane G19: YZ Plane Arc (Offsets J along Y, K along Z)
+            double cy = seg.startY + seg.jOffset;
+            double cz = seg.startZ + seg.kOffset;
+            double radius = Math.hypot(seg.jOffset, seg.kOffset);
 
-                        prevX = pCur[0];
-                        prevY = pCur[1];
-                    }
+            if (radius < 1e-3) {
+                canvas.drawLine(pStart[0], pStart[1], pEnd[0], pEnd[1],
+                        seg.type == MotionType.ARC_CW_G02 ? arcCwPaint : arcCcwPaint);
+            } else {
+                double startAngle = Math.atan2(seg.startZ - cz, seg.startY - cy);
+                double endAngle = Math.atan2(seg.endZ - cz, seg.endY - cy);
+                double sweep = endAngle - startAngle;
+
+                if (seg.type == MotionType.ARC_CW_G02) {
+                    if (sweep >= 0) sweep -= 2 * Math.PI;
+                } else {
+                    if (sweep <= 0) sweep += 2 * Math.PI;
+                }
+
+                int steps = Math.max(20, (int) (Math.abs(sweep) * 20));
+                Paint arcPaint = (seg.type == MotionType.ARC_CW_G02) ? arcCwPaint : arcCcwPaint;
+
+                float prevX = pStart[0];
+                float prevY = pStart[1];
+
+                for (int i = 1; i <= steps; i++) {
+                    double angle = startAngle + (sweep * i / steps);
+                    float curMmY = (float) (cy + radius * Math.cos(angle));
+                    float curMmZ = (float) (cz + radius * Math.sin(angle));
+                    float curMmX = seg.startX + (seg.endX - seg.startX) * i / steps;
+
+                    float[] pCur = project3D(curMmX, curMmY, curMmZ);
+                    canvas.drawLine(prevX, prevY, pCur[0], pCur[1], arcPaint);
+
+                    prevX = pCur[0];
+                    prevY = pCur[1];
+                }
+            }
+        } else {
+            // Default Plane G17: XY Plane Arc (Offsets I along X, J along Y)
+            double cx = seg.startX + seg.iOffset;
+            double cy = seg.startY + seg.jOffset;
+            double radius = Math.hypot(seg.iOffset, seg.jOffset);
+
+            if (radius < 1e-3) {
+                canvas.drawLine(pStart[0], pStart[1], pEnd[0], pEnd[1],
+                        seg.type == MotionType.ARC_CW_G02 ? arcCwPaint : arcCcwPaint);
+            } else {
+                double startAngle = Math.atan2(seg.startY - cy, seg.startX - cx);
+                double endAngle = Math.atan2(seg.endY - cy, seg.endX - cx);
+                double sweep = endAngle - startAngle;
+
+                if (seg.type == MotionType.ARC_CW_G02) {
+                    if (sweep >= 0) sweep -= 2 * Math.PI;
+                } else {
+                    if (sweep <= 0) sweep += 2 * Math.PI;
+                }
+
+                int steps = Math.max(20, (int) (Math.abs(sweep) * 20));
+                Paint arcPaint = (seg.type == MotionType.ARC_CW_G02) ? arcCwPaint : arcCcwPaint;
+
+                float prevX = pStart[0];
+                float prevY = pStart[1];
+
+                for (int i = 1; i <= steps; i++) {
+                    double angle = startAngle + (sweep * i / steps);
+                    float curMmX = (float) (cx + radius * Math.cos(angle));
+                    float curMmY = (float) (cy + radius * Math.sin(angle));
+                    float curMmZ = seg.startZ + (seg.endZ - seg.startZ) * i / steps;
+
+                    float[] pCur = project3D(curMmX, curMmY, curMmZ);
+                    canvas.drawLine(prevX, prevY, pCur[0], pCur[1], arcPaint);
+
+                    prevX = pCur[0];
+                    prevY = pCur[1];
                 }
             }
         }
@@ -624,12 +724,16 @@ public class CncCanvasView extends View {
     }
 
     private void drawHudOverlay(Canvas canvas, int width, int height) {
-        // 1. Perspective Orbit & Reset Hint
-        canvas.drawRect(12, 12, 280, 50, hudBgPaint);
-        canvas.drawText("3D View (Drag to rotate, pinch zoom)", 20, 36, textMutedPaint);
+        // 1. Plane & Feed Info Overlay
+        String planeStr = activePlane == WorkPlane.XZ_G18 ? "G18 (XZ Plane)" :
+                (activePlane == WorkPlane.YZ_G19 ? "G19 (YZ Plane)" : "G17 (XY Plane)");
+
+        canvas.drawRect(12, 12, 300, 75, hudBgPaint);
+        canvas.drawText("Plane: " + planeStr, 20, 36, textWhitePaint);
+        canvas.drawText("Feedrate: F" + (int) activeFeed + " mm/min", 20, 62, textMutedPaint);
 
         // 2. G-Code Motion Legend in Top Right
-        canvas.drawRect(width - 220, 12, width - 12, 105, hudBgPaint);
+        canvas.drawRect(width - 220, 12, width - 12, 110, hudBgPaint);
 
         // Legend G00
         canvas.drawLine(width - 205, 30, width - 175, 30, rapidPaint);
@@ -644,8 +748,8 @@ public class CncCanvasView extends View {
         canvas.drawText("G01 (Z<0 Cut)", width - 165, 80, textWhitePaint);
 
         // Legend Arcs
-        canvas.drawLine(width - 205, 94, width - 190, 94, arcCwPaint);
-        canvas.drawLine(width - 190, 94, width - 175, 94, arcCcwPaint);
-        canvas.drawText("G02/G03 (Arc)", width - 165, 98, textWhitePaint);
+        canvas.drawLine(width - 205, 96, width - 190, 96, arcCwPaint);
+        canvas.drawLine(width - 190, 96, width - 175, 96, arcCcwPaint);
+        canvas.drawText("G02/G03 (Arc)", width - 165, 101, textWhitePaint);
     }
 }

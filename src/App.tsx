@@ -23,8 +23,15 @@ enum MotionType {
   ARC_CCW_G03
 }
 
+enum WorkPlane {
+  XY_G17,
+  XZ_G18,
+  YZ_G19
+}
+
 interface ToolSegment {
   type: MotionType;
+  plane: WorkPlane;
   startX: number;
   startY: number;
   startZ: number;
@@ -33,6 +40,8 @@ interface ToolSegment {
   endZ: number;
   iOffset: number;
   jOffset: number;
+  kOffset: number;
+  feedRate: number;
 }
 
 const tutorialsData: TutorialItem[] = [
@@ -106,21 +115,31 @@ export default function App() {
     const segments: ToolSegment[] = [];
     let curX = 0, curY = 0, curZ = 0;
     let currentMotion = MotionType.LINEAR_G01;
+    let currentPlane = WorkPlane.XY_G17;
+    let currentFeed = 200;
 
     const lines = input.split('\n');
     for (const rawLine of lines) {
       const line = rawLine.replace(/;.*|\(.*\)/g, '').trim().toUpperCase();
       if (!line) continue;
 
-      // Motion code modal
-      const gMatch = line.match(/G0*([0-3])\b/i);
+      // Motion code modal & Plane selection
+      const gMatch = line.match(/G0*([0-3]|17|18|19)\b/g);
       if (gMatch) {
-        const code = gMatch[1];
-        if (code === '0') currentMotion = MotionType.RAPID_G00;
-        else if (code === '1') currentMotion = MotionType.LINEAR_G01;
-        else if (code === '2') currentMotion = MotionType.ARC_CW_G02;
-        else if (code === '3') currentMotion = MotionType.ARC_CCW_G03;
+        for (const gVal of gMatch) {
+          const code = gVal.replace(/^G0*/i, '');
+          if (code === '0') currentMotion = MotionType.RAPID_G00;
+          else if (code === '1') currentMotion = MotionType.LINEAR_G01;
+          else if (code === '2') currentMotion = MotionType.ARC_CW_G02;
+          else if (code === '3') currentMotion = MotionType.ARC_CCW_G03;
+          else if (code === '17') currentPlane = WorkPlane.XY_G17;
+          else if (code === '18') currentPlane = WorkPlane.XZ_G18;
+          else if (code === '19') currentPlane = WorkPlane.YZ_G19;
+        }
       }
+
+      const fMatch = line.match(/F\s*([-+]?\d*\.?\d+)/i);
+      if (fMatch) currentFeed = parseFloat(fMatch[1]);
 
       let targetX = curX;
       let targetY = curY;
@@ -137,6 +156,7 @@ export default function App() {
 
       let offsetI = 0;
       let offsetJ = 0;
+      let offsetK = 0;
       let radiusR = 0;
 
       const iMatch = line.match(/I\s*([-+]?\d*\.?\d+)/i);
@@ -145,30 +165,66 @@ export default function App() {
       const jMatch = line.match(/J\s*([-+]?\d*\.?\d+)/i);
       if (jMatch) offsetJ = parseFloat(jMatch[1]);
 
+      const kMatch = line.match(/K\s*([-+]?\d*\.?\d+)/i);
+      if (kMatch) offsetK = parseFloat(kMatch[1]);
+
       const rMatch = line.match(/R\s*([-+]?\d*\.?\d+)/i);
       if (rMatch) radiusR = parseFloat(rMatch[1]);
 
-      if (radiusR !== 0 && offsetI === 0 && offsetJ === 0 &&
+      if (radiusR !== 0 && offsetI === 0 && offsetJ === 0 && offsetK === 0 &&
         (currentMotion === MotionType.ARC_CW_G02 || currentMotion === MotionType.ARC_CCW_G03)) {
-        const dx = targetX - curX;
-        const dy = targetY - curY;
-        const dist = Math.hypot(dx, dy);
-        if (dist > 0 && dist <= 2 * Math.abs(radiusR)) {
-          const h = Math.sqrt(Math.max(0, radiusR * radiusR - (dist / 2) * (dist / 2)));
-          const mx = (curX + targetX) / 2;
-          const my = (curY + targetY) / 2;
-          let sign = currentMotion === MotionType.ARC_CW_G02 ? -1 : 1;
-          if (radiusR < 0) sign = -sign;
-          const cx = mx + sign * h * (-dy / dist);
-          const cy = my + sign * h * (dx / dist);
-          offsetI = cx - curX;
-          offsetJ = cy - curY;
+        if (currentPlane === WorkPlane.XZ_G18) {
+          const dx = targetX - curX;
+          const dz = targetZ - curZ;
+          const dist = Math.hypot(dx, dz);
+          if (dist > 0 && dist <= 2 * Math.abs(radiusR)) {
+            const h = Math.sqrt(Math.max(0, radiusR * radiusR - (dist / 2) * (dist / 2)));
+            const mx = (curX + targetX) / 2;
+            const mz = (curZ + targetZ) / 2;
+            let sign = currentMotion === MotionType.ARC_CW_G02 ? -1 : 1;
+            if (radiusR < 0) sign = -sign;
+            const cx = mx + sign * h * (-dz / dist);
+            const cz = mz + sign * h * (dx / dist);
+            offsetI = cx - curX;
+            offsetK = cz - curZ;
+          }
+        } else if (currentPlane === WorkPlane.YZ_G19) {
+          const dy = targetY - curY;
+          const dz = targetZ - curZ;
+          const dist = Math.hypot(dy, dz);
+          if (dist > 0 && dist <= 2 * Math.abs(radiusR)) {
+            const h = Math.sqrt(Math.max(0, radiusR * radiusR - (dist / 2) * (dist / 2)));
+            const my = (curY + targetY) / 2;
+            const mz = (curZ + targetZ) / 2;
+            let sign = currentMotion === MotionType.ARC_CW_G02 ? -1 : 1;
+            if (radiusR < 0) sign = -sign;
+            const cy = my + sign * h * (-dz / dist);
+            const cz = mz + sign * h * (dy / dist);
+            offsetJ = cy - curY;
+            offsetK = cz - curZ;
+          }
+        } else { // G17 XY
+          const dx = targetX - curX;
+          const dy = targetY - curY;
+          const dist = Math.hypot(dx, dy);
+          if (dist > 0 && dist <= 2 * Math.abs(radiusR)) {
+            const h = Math.sqrt(Math.max(0, radiusR * radiusR - (dist / 2) * (dist / 2)));
+            const mx = (curX + targetX) / 2;
+            const my = (curY + targetY) / 2;
+            let sign = currentMotion === MotionType.ARC_CW_G02 ? -1 : 1;
+            if (radiusR < 0) sign = -sign;
+            const cx = mx + sign * h * (-dy / dist);
+            const cy = my + sign * h * (dx / dist);
+            offsetI = cx - curX;
+            offsetJ = cy - curY;
+          }
         }
       }
 
-      if (targetX !== curX || targetY !== curY || targetZ !== curZ || offsetI !== 0 || offsetJ !== 0) {
+      if (targetX !== curX || targetY !== curY || targetZ !== curZ || offsetI !== 0 || offsetJ !== 0 || offsetK !== 0) {
         segments.push({
           type: currentMotion,
+          plane: currentPlane,
           startX: curX,
           startY: curY,
           startZ: curZ,
@@ -176,7 +232,9 @@ export default function App() {
           endY: targetY,
           endZ: targetZ,
           iOffset: offsetI,
-          jOffset: offsetJ
+          jOffset: offsetJ,
+          kOffset: offsetK,
+          feedRate: currentFeed
         });
 
         curX = targetX;
@@ -330,38 +388,102 @@ export default function App() {
         ctx.lineWidth = (seg.startZ < 0 || seg.endZ < 0) ? 5 : 3;
         ctx.beginPath(); ctx.moveTo(pStart[0], pStart[1]); ctx.lineTo(pEnd[0], pEnd[1]); ctx.stroke();
       } else { // Arcs G02 / G03
-        const cx = seg.startX + seg.iOffset;
-        const cy = seg.startY + seg.jOffset;
-        const radius = Math.hypot(seg.iOffset, seg.jOffset);
-
         ctx.strokeStyle = (seg.type === MotionType.ARC_CW_G02) ? '#F59E0B' : '#EC4899';
         ctx.lineWidth = 3.5;
 
-        if (radius < 1e-3) {
-          ctx.beginPath(); ctx.moveTo(pStart[0], pStart[1]); ctx.lineTo(pEnd[0], pEnd[1]); ctx.stroke();
-        } else {
-          const startAngle = Math.atan2(seg.startY - cy, seg.startX - cx);
-          const endAngle = Math.atan2(seg.endY - cy, seg.endX - cx);
-          let sweep = endAngle - startAngle;
+        if (seg.plane === WorkPlane.XZ_G18) {
+          const cx = seg.startX + seg.iOffset;
+          const cz = seg.startZ + seg.kOffset;
+          const radius = Math.hypot(seg.iOffset, seg.kOffset);
 
-          if (seg.type === MotionType.ARC_CW_G02) {
-            if (sweep >= 0) sweep -= 2 * Math.PI;
+          if (radius < 1e-3) {
+            ctx.beginPath(); ctx.moveTo(pStart[0], pStart[1]); ctx.lineTo(pEnd[0], pEnd[1]); ctx.stroke();
           } else {
-            if (sweep <= 0) sweep += 2 * Math.PI;
-          }
+            const startAngle = Math.atan2(seg.startZ - cz, seg.startX - cx);
+            const endAngle = Math.atan2(seg.endZ - cz, seg.endX - cx);
+            let sweep = endAngle - startAngle;
 
-          const steps = Math.max(20, Math.floor(Math.abs(sweep) * 20));
-          ctx.beginPath();
-          ctx.moveTo(pStart[0], pStart[1]);
-          for (let step = 1; step <= steps; step++) {
-            const angle = startAngle + (sweep * step / steps);
-            const curMmX = cx + radius * Math.cos(angle);
-            const curMmY = cy + radius * Math.sin(angle);
-            const curMmZ = seg.startZ + (seg.endZ - seg.startZ) * step / steps;
-            const pCur = project3D(curMmX, curMmY, curMmZ);
-            ctx.lineTo(pCur[0], pCur[1]);
+            if (seg.type === MotionType.ARC_CW_G02) {
+              if (sweep >= 0) sweep -= 2 * Math.PI;
+            } else {
+              if (sweep <= 0) sweep += 2 * Math.PI;
+            }
+
+            const steps = Math.max(20, Math.floor(Math.abs(sweep) * 20));
+            ctx.beginPath();
+            ctx.moveTo(pStart[0], pStart[1]);
+            for (let step = 1; step <= steps; step++) {
+              const angle = startAngle + (sweep * step / steps);
+              const curMmX = cx + radius * Math.cos(angle);
+              const curMmZ = cz + radius * Math.sin(angle);
+              const curMmY = seg.startY + (seg.endY - seg.startY) * step / steps;
+              const pCur = project3D(curMmX, curMmY, curMmZ);
+              ctx.lineTo(pCur[0], pCur[1]);
+            }
+            ctx.stroke();
           }
-          ctx.stroke();
+        } else if (seg.plane === WorkPlane.YZ_G19) {
+          const cy = seg.startY + seg.jOffset;
+          const cz = seg.startZ + seg.kOffset;
+          const radius = Math.hypot(seg.jOffset, seg.kOffset);
+
+          if (radius < 1e-3) {
+            ctx.beginPath(); ctx.moveTo(pStart[0], pStart[1]); ctx.lineTo(pEnd[0], pEnd[1]); ctx.stroke();
+          } else {
+            const startAngle = Math.atan2(seg.startZ - cz, seg.startY - cy);
+            const endAngle = Math.atan2(seg.endZ - cz, seg.endY - cy);
+            let sweep = endAngle - startAngle;
+
+            if (seg.type === MotionType.ARC_CW_G02) {
+              if (sweep >= 0) sweep -= 2 * Math.PI;
+            } else {
+              if (sweep <= 0) sweep += 2 * Math.PI;
+            }
+
+            const steps = Math.max(20, Math.floor(Math.abs(sweep) * 20));
+            ctx.beginPath();
+            ctx.moveTo(pStart[0], pStart[1]);
+            for (let step = 1; step <= steps; step++) {
+              const angle = startAngle + (sweep * step / steps);
+              const curMmY = cy + radius * Math.cos(angle);
+              const curMmZ = cz + radius * Math.sin(angle);
+              const curMmX = seg.startX + (seg.endX - seg.startX) * step / steps;
+              const pCur = project3D(curMmX, curMmY, curMmZ);
+              ctx.lineTo(pCur[0], pCur[1]);
+            }
+            ctx.stroke();
+          }
+        } else { // G17 XY
+          const cx = seg.startX + seg.iOffset;
+          const cy = seg.startY + seg.jOffset;
+          const radius = Math.hypot(seg.iOffset, seg.jOffset);
+
+          if (radius < 1e-3) {
+            ctx.beginPath(); ctx.moveTo(pStart[0], pStart[1]); ctx.lineTo(pEnd[0], pEnd[1]); ctx.stroke();
+          } else {
+            const startAngle = Math.atan2(seg.startY - cy, seg.startX - cx);
+            const endAngle = Math.atan2(seg.endY - cy, seg.endX - cx);
+            let sweep = endAngle - startAngle;
+
+            if (seg.type === MotionType.ARC_CW_G02) {
+              if (sweep >= 0) sweep -= 2 * Math.PI;
+            } else {
+              if (sweep <= 0) sweep += 2 * Math.PI;
+            }
+
+            const steps = Math.max(20, Math.floor(Math.abs(sweep) * 20));
+            ctx.beginPath();
+            ctx.moveTo(pStart[0], pStart[1]);
+            for (let step = 1; step <= steps; step++) {
+              const angle = startAngle + (sweep * step / steps);
+              const curMmX = cx + radius * Math.cos(angle);
+              const curMmY = cy + radius * Math.sin(angle);
+              const curMmZ = seg.startZ + (seg.endZ - seg.startZ) * step / steps;
+              const pCur = project3D(curMmX, curMmY, curMmZ);
+              ctx.lineTo(pCur[0], pCur[1]);
+            }
+            ctx.stroke();
+          }
         }
       }
     }
